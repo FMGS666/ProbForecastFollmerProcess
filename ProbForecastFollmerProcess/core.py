@@ -122,7 +122,7 @@ class model(torch.nn.Module):
         # output loss values
         self.loss = loss_values
     
-    def grad_score(self, interpolant, current_state, s):
+    def score(self, interpolant, current_state, s):
         with torch.no_grad():
             drift = self.B_net(interpolant, current_state, s)
         c = self.beta_dot(s)*interpolant + (self.beta(s)*self.alpha_dot(s) - self.beta_dot(s)*self.alpha(s))*current_state
@@ -133,8 +133,8 @@ class model(torch.nn.Module):
     def adjusted_drift(self, interpolant, current_state, s):
         with torch.no_grad():
             drift = self.B_net(interpolant, current_state, s)
-        grad_score = self.grad_score(interpolant, current_state, s)
-        control = 0.5*(self.g(s)**2 - self.sigma(s)**2)*grad_score
+        score = self.score(interpolant, current_state, s)
+        control = 0.5*(self.g(s)**2 - self.sigma(s)**2)*score
         controlled_drift = drift + control
         return controlled_drift
 
