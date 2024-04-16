@@ -13,12 +13,12 @@ class model(torch.nn.Module):
         # device
         self.device = device
 
-        # data
-        self.data_fun = data["fun"]
+        # data (callable)
+        self.data_fun = data["fun"] # (callable) the function for retrieving the data
 
         # sample
-        self.N = sample["N"]
-        self.g = sample["g"]
+        self.N = sample["N"] # (int) the number of points for the euler discretization
+        self.g = sample["g"] # (callable) the function for computing the tunable diffusion term
 
         # constructing discretization
         (self.time, self.stepsizes) = construct_time_discretization(self.N, device = self.device)
@@ -26,12 +26,12 @@ class model(torch.nn.Module):
         # state
         self.dim = state["dim"]
 
-        # interpolant
+        # interpolant (callables)
         self.alpha = interpolant["alpha"]
         self.beta = interpolant["beta"]
         self.sigma = interpolant["sigma"]
 
-        # velocity
+        # velocity (callables)
         self.alpha_dot = velocity["alpha_dot"]
         self.beta_dot = velocity["beta_dot"]
         self.sigma_dot = velocity["sigma_dot"]
@@ -42,16 +42,20 @@ class model(torch.nn.Module):
         self.training_parameters = [{"params": self.B_net.parameters()}]
 
     def interpolant(self, current_state, next_state, z, s):
+        # getting interpolant coefficients
         alpha = self.alpha(s)
         beta = self.beta(s)
         sigma = self.sigma(s)
+        # computing interpolant
         interpolant = alpha*current_state + beta*next_state + torch.sqrt(s)*sigma*z
         return interpolant
 
     def velocity(self, current_state, next_state, z, s):
+        # getting velocity coefficients
         alpha_dot = self.alpha_dot(s)
         beta_dot = self.beta_dot(s)
         sigma_dot = self.sigma_dot(s)
+        # computing velocity
         velocity = alpha_dot*current_state + beta_dot*next_state + torch.sqrt(s)*sigma_dot*z
         return velocity
     
@@ -64,22 +68,24 @@ class model(torch.nn.Module):
         num_iterations = optim_config['num_iterations']
         learning_rate = optim_config['learning_rate']
         num_mc_samples = optim_config['num_mc_samples']
+        # initializing optimizer and scheduler
         optimizer = torch.optim.AdamW(self.training_parameters, lr = learning_rate)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, N*num_iterations)    
 
         # optimization
         loss_values = torch.zeros(num_iterations, device = self.device)
         for current_iter in range(num_iterations):
+            # sampling current states and next states
             current_state, next_state = self.data_fun(N)
 
             # defining the time samples for monte carlo integrations
             mc_samples = torch.rand(num_mc_samples, device = self.device)
 
-            # defining store for output and velocities
+            # defining store for output and velocities for current iteration
             drift_store = torch.zeros(num_mc_samples, N, self.dim, device = self.device)
             velocity_store = torch.zeros(num_mc_samples, N, self.dim, device = self.device)
 
-            # iterating over each mc sample
+            # iterating over each sample for MC integration
             for i, s in enumerate(mc_samples):
                 
                 # sampling the noise
@@ -92,7 +98,7 @@ class model(torch.nn.Module):
                 # forward pass on the model
                 drift = self.B_net.forward(interpolant, current_state, s)
         
-                # storing the output and the velocities
+                # storing drift and velocities
                 drift_store[i, :, :] = drift
                 velocity_store[i, :, :] = velocity
             
@@ -123,17 +129,22 @@ class model(torch.nn.Module):
         self.loss = loss_values
     
     def score(self, interpolant, current_state, s):
+        # computing learned drift
         with torch.no_grad():
             drift = self.B_net(interpolant, current_state, s)
+        # computing score factors
         c = self.beta_dot(s)*interpolant + (self.beta(s)*self.alpha_dot(s) - self.beta_dot(s)*self.alpha(s))*current_state
         A = 1/(s*self.sigma(s)*(self.beta_dot(s)*self.sigma(s) - self.beta(s)*self.sigma_dot(s)))
         score = A*(self.beta(s)*drift - c)
         return score
     
     def adjusted_drift(self, interpolant, current_state, s):
+        # computing learned drift
         with torch.no_grad():
             drift = self.B_net(interpolant, current_state, s)
+        # computing score
         score = self.score(interpolant, current_state, s)
+        # computing control drift term
         control = 0.5*(self.g(s)**2 - self.sigma(s)**2)*score
         controlled_drift = drift + control
         return controlled_drift
@@ -187,4 +198,6 @@ class model(torch.nn.Module):
 
             # storing observation
             samples_store[sample_id, :, :] = X
+            if (sample_id + 1)%10 == 0:
+                print(f"{sample_id + 1} samples generated")
         return (X0, X1), samples_store
