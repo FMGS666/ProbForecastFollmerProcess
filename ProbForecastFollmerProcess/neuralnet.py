@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import nn
 
 class MLP(torch.nn.Module):
-    def __init__(self, input_dim, layer_widths, activate_final = False, activation_fn = torch.nn.LeakyReLU):
+    def __init__(self, input_dim, layer_widths, activate_final = False, activation_fn = torch.nn.Identity):
         """
         Parameters
         ----------    
