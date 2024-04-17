@@ -38,10 +38,11 @@ def g_follmer(s):
     return g
 
 # defining sampling function
-def sample_observations(N, observation_store):
-    indexes = torch.randint(0, num_observations - tau_mul, size = (N,))
-    current_state = observation_store[indexes, :].to(device)
-    next_state = observation_store[indexes + tau_mul, :].to(device)
+def sample_observations(N, observation_store, lag):
+    num_observations = observation_store.shape[0]
+    indexes = torch.randint(0, num_observations - lag, size = (N,))
+    current_state = observation_store[indexes, :]
+    next_state = observation_store[indexes + lag, :]
     return current_state, next_state
 
 # function for plotting densities heatmap

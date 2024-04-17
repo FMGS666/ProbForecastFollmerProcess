@@ -14,7 +14,8 @@ class model(torch.nn.Module):
         self.device = device
 
         # data (callable)
-        self.data_fun = data["fun"] # (callable) the function for retrieving the data
+        self.train_data = data["train"] # (callable) the function for retrieving the train data
+        self.test_data = data["test"] # (callable) the function for retrieving the test data
 
         # sample
         self.N = sample["N"] # (int) the number of points for the euler discretization
@@ -60,7 +61,6 @@ class model(torch.nn.Module):
         return velocity
     
     def train(self, optim_config):
-
         # optimization configuration
         minibatch = optim_config['minibatch']
         num_obs_per_batch = optim_config['num_obs_per_batch']
@@ -76,7 +76,7 @@ class model(torch.nn.Module):
         loss_values = torch.zeros(num_iterations, device = self.device)
         for current_iter in range(num_iterations):
             # sampling current states and next states
-            current_state, next_state = self.data_fun(N)
+            current_state, next_state = self.train_data(N)
 
             # defining the time samples for monte carlo integrations
             mc_samples = torch.rand(num_mc_samples, device = self.device)
@@ -149,18 +149,21 @@ class model(torch.nn.Module):
         controlled_drift = drift + control
         return controlled_drift
 
-    def sample(self, sample_config):
+    def sample(self, sample_config, train = False):
         # getting the number of samples onn the 0, 1 interval
         minibatch = sample_config['minibatch']
         num_obs_per_batch = sample_config['num_obs_per_batch']
         num_samples_per_obs = sample_config["num_samples_per_obs"]
-        num_samples = minibatch * num_obs_per_batch
+        num_obs = minibatch * num_obs_per_batch
         
+        # setting the target sampler function (either train or test)
+        data_fun = self.train_data if train else self.test_data
+
         # getting the data to sample from 
-        current_states, next_states = self.data_fun(num_samples)
+        current_states, next_states = data_fun(num_obs)
 
         # defining the store for the estimated next states
-        samples_store = torch.zeros((num_samples_per_obs, num_samples, self.dim))
+        samples_store = torch.zeros((num_samples_per_obs, num_obs, self.dim))
 
         # iterating over the number of the samples generated for each obs
         for sample_id in range(num_samples_per_obs):
@@ -170,7 +173,7 @@ class model(torch.nn.Module):
             # computing drift
             drift = self.stepsizes[0]*self.B_net(X0, X0, self.time[0])
             # sampling noise 
-            eta = torch.randn((num_samples, self.dim), device = self.device)
+            eta = torch.randn((num_obs, self.dim), device = self.device)
             # computing diffusion
             diffusion = self.sigma(self.time[0])*torch.sqrt(self.stepsizes[0])*eta
             # updating state
@@ -188,7 +191,7 @@ class model(torch.nn.Module):
                 drift = delta_s*self.adjusted_drift(X, X0, s)
 
                 # sampling noise
-                eta = torch.randn((num_samples, self.dim), device = self.device)
+                eta = torch.randn((num_obs, self.dim), device = self.device)
 
                 # computing diffusion term
                 diffusion = self.g(s)*torch.sqrt(delta_s)*eta
