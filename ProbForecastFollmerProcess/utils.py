@@ -1,8 +1,17 @@
 import torch
+import random
 
 import numpy as np
 
 from tqdm.notebook import tqdm
+
+# defining function for ensuring reproducible results
+def ensure_reproducibility(SEED):
+    torch.backends.cudnn.deterministic = True  
+    torch.backends.cudnn.benchmark = True  
+    torch.manual_seed(SEED)  
+    np.random.seed(SEED)  
+    random.seed(SEED)
 
 # defining interpolant configurations
 interpolant = {
