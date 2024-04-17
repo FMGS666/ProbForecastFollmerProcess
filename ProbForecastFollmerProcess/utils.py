@@ -1,5 +1,7 @@
 import torch
 
+import numpy as np
+
 from tqdm.notebook import tqdm
 
 # defining interpolant configurations
@@ -34,6 +36,20 @@ def g_follmer(s):
     g = torch.abs(g)
     g = torch.sqrt(g)
     return g
+
+# defining sampling function
+def sample_observations(N, observation_store):
+    indexes = torch.randint(0, num_observations - tau_mul, size = (N,))
+    current_state = observation_store[indexes, :].to(device)
+    next_state = observation_store[indexes + tau_mul, :].to(device)
+    return current_state, next_state
+
+# function for plotting densities heatmap
+def plot_density(x, y, fig, axes, title = "", bins = 200, ax_bound = None):
+    heatmap, xedges, yedges = np.histogram2d(x, y, bins=bins)
+    extent = [-ax_bound, ax_bound]*2 if ax_bound is not None else [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+    axes.imshow(heatmap.T, extent=extent, origin='lower', cmap = "grey")
+    axes.set_title(title)
 
 # function for simulating multimodal jump diffusion process
 def simulate_jump_diffusion(simulation_conf):
