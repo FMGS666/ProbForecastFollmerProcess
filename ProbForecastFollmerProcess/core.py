@@ -121,8 +121,8 @@ class model(torch.nn.Module):
             # store learning rate
             current_lr = optimizer.param_groups[0]["lr"]
             lr_values[current_iter] = current_lr
-            if current_iter%50 == 0: 
-                print('Optimization iter:', current_iter, 'Learning Rate:', current_lr, 'Loss:', current_loss) 
+            if current_iter==0 or (current_iter+1)%50 == 0: 
+                print('Optimization iter:', current_iter+1, 'Learning Rate:', current_lr, 'Loss:', current_loss) 
 
         # output loss values and lrs
         self.loss = loss_values
