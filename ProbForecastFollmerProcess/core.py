@@ -70,26 +70,26 @@ class model(torch.nn.Module):
         num_mc_samples = optim_config['num_mc_samples']
         # initializing optimizer and scheduler
         optimizer = torch.optim.AdamW(self.training_parameters, lr = learning_rate)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, N*num_iterations)    
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, num_iterations)    
 
         # optimization
         loss_values = torch.zeros(num_iterations, device = self.device)
+        lr_values = torch.zeros(num_iterations, device = self.device)
         for current_iter in range(num_iterations):
             # sampling current states and next states
             current_state, next_state = self.train_data(N)
 
+            # sampling the noise
+            z = torch.randn(current_state.shape, device = self.device)
+
             # defining the time samples for monte carlo integrations
             mc_samples = torch.rand(num_mc_samples, device = self.device)
 
-            # defining store for output and velocities for current iteration
-            drift_store = torch.zeros(num_mc_samples, N, self.dim, device = self.device)
-            velocity_store = torch.zeros(num_mc_samples, N, self.dim, device = self.device)
+            # defining store for mc estimation of loss
+            loss_store = torch.zeros(num_mc_samples, device = self.device)
 
             # iterating over each sample for MC integration
             for i, s in enumerate(mc_samples):
-                
-                # sampling the noise
-                z = torch.randn(current_state.shape, device = self.device)
 
                 # computing the interpolant and velocity
                 interpolant = self.interpolant(current_state, next_state, z, s)
@@ -98,16 +98,12 @@ class model(torch.nn.Module):
                 # forward pass on the model
                 drift = self.B_net.forward(interpolant, current_state, s)
         
-                # storing drift and velocities
-                drift_store[i, :, :] = drift
-                velocity_store[i, :, :] = velocity
-            
-            # reshaping the store to (num_mc_sample*N, self.dim)
-            drift_store = torch.flatten(drift_store, start_dim = 0, end_dim = 1)
-            velocity_store = torch.flatten(velocity_store, start_dim = 0, end_dim = 1)
+                # computing loss and storing it
+                loss = F.mse_loss(drift, velocity)
+                loss_store[i] = loss
 
-            # computing loss
-            loss = F.mse_loss(drift_store, velocity_store)
+            # averaging the loss over the mc samples
+            loss = torch.mean(loss_store)
             
             # backpropagation
             loss.backward()
@@ -122,11 +118,15 @@ class model(torch.nn.Module):
             # store loss 
             current_loss = loss.item()
             loss_values[current_iter] = current_loss
-            if (current_iter == 0) or ((current_iter+1) % 50 == 0):
-                print('Optimization iteration:', current_iter+1, 'Loss:', current_loss)
+            # store learning rate
+            current_lr = optimizer.param_groups[0]["lr"]
+            lr_values[current_iter] = current_lr
+            if current_iter%50 == 0: 
+                print('Optimization iter:', current_iter, 'Learning Rate:', current_lr, 'Loss:', current_loss) 
 
-        # output loss values
+        # output loss values and lrs
         self.loss = loss_values
+        self.lrs = lr_values
     
     def score(self, interpolant, current_state, s):
         # computing learned drift
@@ -149,6 +149,38 @@ class model(torch.nn.Module):
         controlled_drift = drift + control
         return controlled_drift
 
+    # method for performing a single sampling step on a batch of data
+    def sampling_step(self, X0):
+        # getting number of observations
+        num_obs = X0.shape[0]
+        # computing drift
+        drift = self.stepsizes[0]*self.B_net(X0, X0, self.time[0])
+        # sampling noise 
+        eta = torch.randn((num_obs, self.dim), device = self.device)
+        # computing diffusion
+        diffusion = self.sigma(self.time[0])*torch.sqrt(self.stepsizes[0])*eta
+        # updating state
+        X = X0 + drift + diffusion
+
+        # iterating over each step of the euler discretization
+        for n in range(1, self.N):
+            # gettng the stepsize
+            delta_s = self.stepsizes[n]
+            s = self.time[n]
+
+            # computing adjusted drift
+            drift = delta_s*self.adjusted_drift(X, X0, s)
+
+            # sampling noise
+            eta = torch.randn((num_obs, self.dim), device = self.device)
+
+            # computing diffusion term
+            diffusion = self.g(s)*torch.sqrt(delta_s)*eta
+
+            # euler step
+            X = X + drift + diffusion
+        return X
+
     def sample(self, sample_config, train = False):
         # getting the number of samples onn the 0, 1 interval
         minibatch = sample_config['minibatch']
@@ -160,47 +192,49 @@ class model(torch.nn.Module):
         data_fun = self.train_data if train else self.test_data
 
         # getting the data to sample from 
-        current_states, next_states = data_fun(num_obs)
+        X0, X1 = data_fun(num_obs)
 
         # defining the store for the estimated next states
         samples_store = torch.zeros((num_samples_per_obs, num_obs, self.dim))
 
         # iterating over the number of the samples generated for each obs
         for sample_id in range(num_samples_per_obs):
-            # computing first observation and storing it
-            X0 = current_states
-            X1 = next_states
-            # computing drift
-            drift = self.stepsizes[0]*self.B_net(X0, X0, self.time[0])
-            # sampling noise 
-            eta = torch.randn((num_obs, self.dim), device = self.device)
-            # computing diffusion
-            diffusion = self.sigma(self.time[0])*torch.sqrt(self.stepsizes[0])*eta
-            # updating state
-            X = X0 + drift + diffusion
-            # storing observations
-            samples_store[0, :] = X
-
-            # iterating over each step of the euler discretization
-            for n in range(1, self.N):
-                # gettng the stepsize
-                delta_s = self.stepsizes[n]
-                s = self.time[n]
-
-                # computing adjusted drift
-                drift = delta_s*self.adjusted_drift(X, X0, s)
-
-                # sampling noise
-                eta = torch.randn((num_obs, self.dim), device = self.device)
-
-                # computing diffusion term
-                diffusion = self.g(s)*torch.sqrt(delta_s)*eta
-
-                # euler step
-                X = X + drift + diffusion
+            # performing sampling step
+            X = self.sampling_step(X0)
 
             # storing observation
             samples_store[sample_id, :, :] = X
             if (sample_id + 1)%10 == 0:
                 print(f"{sample_id + 1} samples generated")
         return (X0, X1), samples_store
+
+    def sample_autoregressive(self, sample_config, train = False):
+        # getting the number of samples onn the 0, 1 interval
+        minibatch = sample_config['minibatch']
+        num_obs_per_batch = sample_config['num_obs_per_batch']
+        num_obs = minibatch * num_obs_per_batch
+
+        # getting the number of autoregressive steps
+        ar_steps = sample_config["ar_steps"]
+        
+        # setting the target sampler function (either train or test)
+        data_fun = self.train_data if train else self.test_data
+
+        # defining the store for the estimated next states
+        ar_samples_store = torch.zeros((ar_steps, num_obs, self.dim))
+
+        # getting the data to sample from 
+        current_obs, _ = data_fun(num_obs) 
+        X0 = current_obs
+
+        # iterating over each auto regressive step
+        for ar_step in range(ar_steps):
+            # performing sampling step
+            X = self.sampling_step(X0)
+            # storing sampled observation 
+            ar_samples_store[ar_step, :, :] = X
+            # setting sampled observation as starting condition
+            X0 = X
+            if (ar_step + 1)%10 == 0:
+                print(f"{ar_step + 1} auto regressive steps taken")
+        return current_obs, ar_samples_store

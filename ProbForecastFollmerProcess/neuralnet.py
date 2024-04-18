@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import nn
 
 class MLP(torch.nn.Module):
-    def __init__(self, input_dim, layer_widths, activate_final = False, activation_fn = torch.nn.Identity):
+    def __init__(self, input_dim, layer_widths, activate_final = False, activation_fn = torch.nn.ReLU()):
         """
         Parameters
         ----------    
@@ -53,10 +53,10 @@ class B_Network(torch.nn.Module):
         input_dimension = dimension_state*2 + 1# interpolant + state + time     
         layers = config['layers']
         self.standardization = config['standardization']
-        self.net = MLP(input_dimension, 
-                       layer_widths = layers + [dimension_state], # output should be the dimension of the state
-                       activate_final = False,
-                       activation_fn = torch.nn.LeakyReLU())
+        self.net = MLP(
+            input_dimension, 
+            layer_widths = layers + [dimension_state], # output should be the dimension of the state
+        )
 
     def forward(self, interpolant, state, t):
         """
