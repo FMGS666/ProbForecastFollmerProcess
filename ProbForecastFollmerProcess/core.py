@@ -14,8 +14,8 @@ class model(torch.nn.Module):
         self.device = device
 
         # data (callable)
-        self.train_data = data["train"] # (callable) the function for retrieving the train data
-        self.test_data = data["test"] # (callable) the function for retrieving the test data
+        self.train_data = data["train"] # dataset holding the train observations
+        self.test_data = data["test"] # dataset holding the test observations
 
         # sample
         self.N = sample["N"] # (int) the number of points for the euler discretization
@@ -62,67 +62,72 @@ class model(torch.nn.Module):
     
     def train(self, optim_config):
         # optimization configuration
-        minibatch = optim_config['minibatch']
-        num_obs_per_batch = optim_config['num_obs_per_batch']
-        N = minibatch * num_obs_per_batch
-        num_iterations = optim_config['num_iterations']
+        batch_size = optim_config['batch_size']
+        num_epochs = optim_config['num_epochs']
         learning_rate = optim_config['learning_rate']
         num_mc_samples = optim_config['num_mc_samples']
+        # constructing data loader 
+        train_data_loader = torch.utils.data.DataLoader(self.train_data, batch_size = batch_size, shuffle = True)
+        # getting the number of batches
+        num_batches = len(train_data_loader)
         # initializing optimizer and scheduler
         optimizer = torch.optim.AdamW(self.training_parameters, lr = learning_rate)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, num_iterations)    
-
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, num_epochs*num_batches)
         # optimization
-        loss_values = torch.zeros(num_iterations, device = self.device)
-        lr_values = torch.zeros(num_iterations, device = self.device)
-        for current_iter in range(num_iterations):
-            # sampling current states and next states
-            current_state, next_state = self.train_data(N)
+        loss_values = torch.zeros(num_epochs*num_batches)
+        lr_values = torch.zeros(num_epochs*num_batches)
+        # iterating over the number of epochs
+        for current_epoch in range(num_epochs):
+            # iterating over the train data loader
+            for batch_idx, (current_state, next_state) in enumerate(train_data_loader):
+                # sampling the noise
+                z = torch.randn(current_state.shape, device = self.device)
 
-            # sampling the noise
-            z = torch.randn(current_state.shape, device = self.device)
+                # defining the time samples for monte carlo integrations
+                mc_samples = torch.rand(num_mc_samples, device = self.device)
 
-            # defining the time samples for monte carlo integrations
-            mc_samples = torch.rand(num_mc_samples, device = self.device)
+                # defining store for mc estimation of loss
+                loss_store = torch.zeros(num_mc_samples, device = self.device)
 
-            # defining store for mc estimation of loss
-            loss_store = torch.zeros(num_mc_samples, device = self.device)
+                # iterating over each sample for MC integration
+                for i, s in enumerate(mc_samples):
 
-            # iterating over each sample for MC integration
-            for i, s in enumerate(mc_samples):
+                    # computing the interpolant and velocity
+                    interpolant = self.interpolant(current_state, next_state, z, s)
+                    velocity = self.velocity(current_state, next_state, z, s)
 
-                # computing the interpolant and velocity
-                interpolant = self.interpolant(current_state, next_state, z, s)
-                velocity = self.velocity(current_state, next_state, z, s)
-
-                # forward pass on the model
-                drift = self.B_net.forward(interpolant, current_state, s)
-        
-                # computing loss and storing it
-                loss = F.mse_loss(drift, velocity)
-                loss_store[i] = loss
-
-            # averaging the loss over the mc samples
-            loss = torch.mean(loss_store)
+                    # forward pass on the model
+                    drift = self.B_net.forward(interpolant, current_state, s)
             
-            # backpropagation
-            loss.backward()
-    
-            # optimization step and zero gradient
-            optimizer.step()
-            optimizer.zero_grad()
+                    # computing loss and storing it
+                    loss = F.mse_loss(drift, velocity)
+                    loss_store[i] = loss
 
-            # scheduler step
-            scheduler.step()
+                # averaging the loss over the mc samples
+                loss = torch.mean(loss_store)
+                
+                # backpropagation
+                loss.backward()
 
-            # store loss 
-            current_loss = loss.item()
-            loss_values[current_iter] = current_loss
-            # store learning rate
-            current_lr = optimizer.param_groups[0]["lr"]
-            lr_values[current_iter] = current_lr
-            if current_iter==0 or (current_iter+1)%50 == 0: 
-                print('Optimization iter:', current_iter+1, 'Learning Rate:', current_lr, 'Loss:', current_loss) 
+                # optimization step and zero gradient
+                optimizer.step()
+                optimizer.zero_grad()
+
+                # getting the iteration index
+                index = current_epoch*num_batches + batch_idx
+                # store loss 
+                current_loss = loss.item()
+                loss_values[index] = current_loss
+        
+                # scheduler step
+                scheduler.step()
+
+                # store learning rate
+                current_lr = optimizer.param_groups[0]["lr"]
+                lr_values[index] = current_lr
+            
+            # show progress
+            print('Optimization epoch:', current_epoch+1, 'Learning Rate:', current_lr, 'Loss:', current_loss) 
 
         # output loss values and lrs
         self.loss = loss_values
@@ -182,23 +187,22 @@ class model(torch.nn.Module):
         return X
 
     def sample(self, sample_config, train = False):
-        # getting the number of samples onn the 0, 1 interval
-        minibatch = sample_config['minibatch']
-        num_obs_per_batch = sample_config['num_obs_per_batch']
-        num_samples_per_obs = sample_config["num_samples_per_obs"]
-        num_obs = minibatch * num_obs_per_batch
-        
+        # getting number of samples
+        num_samples = sample_config["num_samples"]
         # setting the target sampler function (either train or test)
         data_fun = self.train_data if train else self.test_data
 
         # getting the data to sample from 
-        X0, X1 = data_fun(num_obs)
+        X0, X1 = data_fun[:]
+
+        # getting number of observations
+        num_obs = len(data_fun)
 
         # defining the store for the estimated next states
-        samples_store = torch.zeros((num_samples_per_obs, num_obs, self.dim))
+        samples_store = torch.zeros((num_samples, num_obs, self.dim))
 
         # iterating over the number of the samples generated for each obs
-        for sample_id in range(num_samples_per_obs):
+        for sample_id in range(num_samples):
             # performing sampling step
             X = self.sampling_step(X0)
 
@@ -209,32 +213,30 @@ class model(torch.nn.Module):
         return (X0, X1), samples_store
 
     def sample_autoregressive(self, sample_config, train = False):
-        # getting the number of samples onn the 0, 1 interval
-        minibatch = sample_config['minibatch']
-        num_obs_per_batch = sample_config['num_obs_per_batch']
-        num_obs = minibatch * num_obs_per_batch
-
         # getting the number of autoregressive steps
-        ar_steps = sample_config["ar_steps"]
+        num_ar_steps = sample_config["num_ar_steps"]
         
         # setting the target sampler function (either train or test)
         data_fun = self.train_data if train else self.test_data
 
         # defining the store for the estimated next states
-        ar_samples_store = torch.zeros((ar_steps, num_obs, self.dim))
+        ar_samples_store = torch.zeros((num_ar_steps, self.dim))
 
-        # getting the data to sample from 
-        current_obs, _ = data_fun(num_obs) 
-        X0 = current_obs
+        # getting the first point of the dynamics to simulate autoregressively 
+        current_obs, _ = data_fun[0] # shape (self.dim)
+        X0 = torch.unsqueeze(current_obs, dim = 0) # shape (1, self.dim)
+        
+        # retrieving the ground truth path over the number of autoregressive steps
+        _, gt_path = data_fun[:num_ar_steps]
 
         # iterating over each auto regressive step
-        for ar_step in range(ar_steps):
+        for ar_step in range(num_ar_steps):
             # performing sampling step
             X = self.sampling_step(X0)
             # storing sampled observation 
-            ar_samples_store[ar_step, :, :] = X
+            ar_samples_store[ar_step, :] = X
             # setting sampled observation as starting condition
             X0 = X
-            if (ar_step + 1)%10 == 0:
+            if (ar_step + 1)%50 == 0:
                 print(f"{ar_step + 1} auto regressive steps taken")
-        return current_obs, ar_samples_store
+        return (current_obs, gt_path), ar_samples_store

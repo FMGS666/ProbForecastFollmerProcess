@@ -47,12 +47,12 @@ def g_follmer(s):
     return g
 
 # defining sampling function
-def sample_observations(N, observation_store, lag):
+def pair_lagged_observations(observation_store, lag):
     num_observations = observation_store.shape[0]
-    indexes = torch.randint(0, num_observations - lag, size = (N,))
-    current_state = observation_store[indexes, :]
-    next_state = observation_store[indexes + lag, :]
-    return current_state, next_state
+    indexes = torch.arange(num_observations - lag)
+    current_observation = observation_store[indexes]
+    next_observation = observation_store[indexes + 1]
+    return current_observation, next_observation
 
 # function for plotting densities heatmap
 def plot_density(x, y, fig, axes, title = "", bins = 200, ax_bound = None):
