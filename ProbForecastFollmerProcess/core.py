@@ -115,6 +115,7 @@ class model(torch.nn.Module):
 
                 # getting the iteration index
                 index = current_epoch*num_batches + batch_idx
+
                 # store loss 
                 current_loss = loss.item()
                 loss_values[index] = current_loss
@@ -187,16 +188,14 @@ class model(torch.nn.Module):
         return X
 
     def sample(self, sample_config, train = False):
-        # getting number of samples
+        # getting number of samples and observations
         num_samples = sample_config["num_samples"]
+        num_obs = sample_config["num_obs"]
         # setting the target sampler function (either train or test)
         data_fun = self.train_data if train else self.test_data
 
         # getting the data to sample from 
-        X0, X1 = data_fun[:]
-
-        # getting number of observations
-        num_obs = len(data_fun)
+        X0, X1 = data_fun[:num_obs]
 
         # defining the store for the estimated next states
         samples_store = torch.zeros((num_samples, num_obs, self.dim))
@@ -208,7 +207,7 @@ class model(torch.nn.Module):
 
             # storing observation
             samples_store[sample_id, :, :] = X
-            if (sample_id + 1)%10 == 0:
+            if (sample_id + 1)%50 == 0:
                 print(f"{sample_id + 1} samples generated")
         return (X0, X1), samples_store
 
