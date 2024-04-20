@@ -8,8 +8,11 @@ __pycache__/
 
 # Tensors and Models
 *.pt
+*.pth
 # Videos
 *.mp4
+# yaml configuration files
+*.yaml
 
 # Distribution / packaging
 .Python
