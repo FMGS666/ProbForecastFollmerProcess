@@ -1,3 +1,4 @@
+import gc
 import torch
 import torchvision
 
@@ -89,7 +90,7 @@ class LaggedDataset(torch.utils.data.Dataset):
 # class for handling the paired lagged datasets with random context
 class LaggedDatasetWithRandomContext(torch.utils.data.Dataset):
     def __init__(self, current_states, next_states, random_context_states, device):
-        super(LaggedDataset, self).__init__()
+        super(LaggedDatasetWithRandomContext, self).__init__()
         self.current_states = current_states
         self.next_states = next_states
         self.random_context_states = random_context_states
@@ -99,7 +100,8 @@ class LaggedDatasetWithRandomContext(torch.utils.data.Dataset):
         return self.next_states.shape[0]
     
     def __getitem__(self, idx):
-        current_state = self.current_states[idx].to(self.device)
-        next_state = self.next_states[idx].to(self.device)
-        random_context_state = self.random_context_states[idx].to(self.device)
-        return random_context_state, current_state, next_state
+        current_state = self.current_states[idx].to(self.device) # shape: num_channels, height, width
+        next_state = self.next_states[idx].to(self.device) # shape: num_channels, height, width
+        random_context_state = self.random_context_states[idx].to(self.device) # shape: num_channels, height, width
+        concatenated_context_frames = torch.cat([current_state, next_state, random_context_state], dim = 0) # shape: num_channels*3, height, width
+        return concatenated_context_frames
