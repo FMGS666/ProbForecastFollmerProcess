@@ -1,22 +1,6 @@
 import torch
 import torchvision
 
-# class for handling the paired lagged datasets
-class LaggedDataset(torch.utils.data.Dataset):
-    def __init__(self, current_states, next_states, device):
-        super(LaggedDataset, self).__init__()
-        self.current_states = current_states
-        self.next_states = next_states
-        self.device = device
-    
-    def __len__(self):
-        return self.next_states.shape[0]
-    
-    def __getitem__(self, idx):
-        current_state = self.current_states[idx].to(self.device)
-        next_state = self.next_states[idx].to(self.device)
-        return current_state, next_state
-
 # defining class for video dataset
 class VideoDataset(torch.utils.data.Dataset):
     def __init__(self, mp4_file_list, augmentations = None):
@@ -85,3 +69,37 @@ class VQGANLatentVideoDataset(torch.utils.data.Dataset):
         gc.collect()
         torch.cuda.empty_cache()
         return latent_video
+
+# class for handling the paired lagged datasets
+class LaggedDataset(torch.utils.data.Dataset):
+    def __init__(self, current_states, next_states, device):
+        super(LaggedDataset, self).__init__()
+        self.current_states = current_states
+        self.next_states = next_states
+        self.device = device
+    
+    def __len__(self):
+        return self.next_states.shape[0]
+    
+    def __getitem__(self, idx):
+        current_state = self.current_states[idx].to(self.device)
+        next_state = self.next_states[idx].to(self.device)
+        return current_state, next_state
+
+# class for handling the paired lagged datasets with random context
+class LaggedDatasetWithRandomContext(torch.utils.data.Dataset):
+    def __init__(self, current_states, next_states, random_context_states, device):
+        super(LaggedDataset, self).__init__()
+        self.current_states = current_states
+        self.next_states = next_states
+        self.random_context_states = random_context_states
+        self.device = device
+    
+    def __len__(self):
+        return self.next_states.shape[0]
+    
+    def __getitem__(self, idx):
+        current_state = self.current_states[idx].to(self.device)
+        next_state = self.next_states[idx].to(self.device)
+        random_context_state = self.random_context_states[idx].to(self.device)
+        return random_context_state, current_state, next_state
