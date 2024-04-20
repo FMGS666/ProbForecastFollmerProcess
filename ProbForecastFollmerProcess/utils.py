@@ -46,13 +46,24 @@ def g_follmer(s):
     g = torch.sqrt(g)
     return g
 
-# defining sampling function
+# defining function for creating the context
 def pair_lagged_observations(observation_store, lag):
     num_observations = observation_store.shape[0]
     indexes = torch.arange(num_observations - lag)
     current_observation = observation_store[indexes]
     next_observation = observation_store[indexes + 1]
     return current_observation, next_observation
+
+# defining function for creating the random context specified in the paper
+def pair_lagged_observations_with_random_context(tensor_video):
+    num_frames = tensor_video.shape[0]
+    indexes = torch.arange(num_frames - 1)
+    next_indexes = indexes + 1
+    random_context_indexes = [torch.randint(high = x.item(), size = (1, )) for x in next_indexes]
+    target_frame = tensor_video[next_indexes]
+    past_frame = tensor_video[indexes]
+    random_context_frame = tensor_video[random_context_indexes]
+    return (target_frame, past_frame, random_context_frame)
 
 # function for plotting densities heatmap
 def plot_density(x, y, fig, axes, title = "", bins = 200, ax_bound = None):
