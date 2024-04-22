@@ -85,7 +85,12 @@ class LaggedDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         current_state = self.current_states[idx].to(self.device)
         next_state = self.next_states[idx].to(self.device)
-        return current_state, next_state
+        batch_dict = {
+            "current_state": current_state, 
+            "next_state": next_state,
+            "conditioning_state": next_state
+        }
+        return batch_dict
 
 # class for handling the paired lagged datasets with random context
 class LaggedDatasetWithRandomContext(torch.utils.data.Dataset):
@@ -103,5 +108,10 @@ class LaggedDatasetWithRandomContext(torch.utils.data.Dataset):
         current_state = self.current_states[idx].to(self.device) # shape: num_channels, height, width
         next_state = self.next_states[idx].to(self.device) # shape: num_channels, height, width
         random_context_state = self.random_context_states[idx].to(self.device) # shape: num_channels, height, width
-        concatenated_context_frames = torch.cat([current_state, next_state, random_context_state], dim = 0) # shape: num_channels*3, height, width
-        return concatenated_context_frames
+        conditioning_state = torch.cat([current_state, random_context_state], dim = 0 if len(current_state.shape) == 3 else 1) # shape: num_channels*3, height, width
+        batch_dict = {
+            "current_state": current_state, 
+            "next_state": next_state, 
+            "conditioning_state": conditioning_state, 
+        }
+        return batch_dict

@@ -58,7 +58,7 @@ class B_Network(torch.nn.Module):
             layer_widths = layers + [dimension_state], # output should be the dimension of the state
         )
 
-    def forward(self, interpolant, state, t):
+    def forward(self, interpolant, t, state):
         """
         Parameters
         ----------

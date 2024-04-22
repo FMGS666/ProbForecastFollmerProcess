@@ -5,6 +5,8 @@ import numpy as np
 
 from tqdm.notebook import tqdm
 
+from .data import LaggedDatasetWithRandomContext
+
 # defining function for ensuring reproducible results
 def ensure_reproducibility(SEED):
     torch.backends.cudnn.deterministic = True  
@@ -64,6 +66,12 @@ def pair_lagged_observations_with_random_context(tensor_video):
     past_frame = tensor_video[indexes]
     random_context_frame = tensor_video[random_context_indexes]
     return (target_frame, past_frame, random_context_frame)
+
+# defining function for creating a lagged dataset with random context from a tensor holding a video
+def get_video_dataset_with_random_context(video_tensor, device):
+    target_frame, past_frame, random_context_frame = pair_lagged_observations_with_random_context(video_tensor)
+    video_dataset_with_random_context = LaggedDatasetWithRandomContext(past_frame, target_frame, random_context_frame, device)
+    return video_dataset_with_random_context
 
 # function for plotting densities heatmap
 def plot_density(x, y, fig, axes, title = "", bins = 200, ax_bound = None):
