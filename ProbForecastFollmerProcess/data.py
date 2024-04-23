@@ -88,7 +88,7 @@ class LaggedDataset(torch.utils.data.Dataset):
         batch_dict = {
             "current_state": current_state, 
             "next_state": next_state,
-            "conditioning_state": next_state
+            "conditioning_state": current_state
         }
         return batch_dict
 

@@ -21,8 +21,6 @@ class MLP(torch.nn.Module):
         prev_width = input_dim
         for layer_width in layer_widths:
             layers.append(torch.nn.Linear(prev_width, layer_width))
-            # # same init for everyone
-            # torch.nn.init.constant_(layers[-1].weight, 0)
             prev_width = layer_width
         self.input_dim = input_dim
         self.layer_widths = layer_widths

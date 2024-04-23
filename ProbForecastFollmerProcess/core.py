@@ -8,7 +8,7 @@ def construct_time_discretization(N, device):
     return (time, stepsizes)
 
 class model(torch.nn.Module):
-    def __init__(self, backbone, data, sample, state, interpolant, velocity, optim, device = 'cpu', debug = False, verbose = 2, random_ar_context = False):
+    def __init__(self, backbone, data, sample, state, interpolant, velocity, optim, device = 'cpu', debug = False, verbose = 1, random_ar_context = False):
         super(model, self).__init__()
         # device
         self.device = device
@@ -154,6 +154,7 @@ class model(torch.nn.Module):
     # input: the batch on which to perform the training step
     # returns: the monte carlo estimation of the loss of equation (14)
     def train_step(self, batch):
+        ################### READING BATCH DICTIONARY ######################
         # retrieving current state, next state and conditioning state
         X0 = batch["current_state"]
         X1 = batch["next_state"]
@@ -203,6 +204,7 @@ class model(torch.nn.Module):
     # input: the batch on which to perform the sampling step
     # returns: single realization of a sample obtained with algorithm (2)
     def sampling_step(self, batch):
+        ################### READING BATCH DICTIONARY ######################
         # retrieving current state, next state and conditioning state
         X0 = batch["current_state"]
         Xc = batch["conditioning_state"]
@@ -279,7 +281,7 @@ class model(torch.nn.Module):
                 # displaying progress
                 if self.verbose > 1:
                     print(f"epoch: {current_epoch+1}/{self.num_epochs}, batch: {batch_idx}/{len(self.train_data_loader)}, loss: {current_loss}, learning_rate: {current_lr}")
-                # checking if the number of gradient steps has been reached
+                # checking if the maximum number of gradient steps has been reached
                 # and breaking batching loop in case
                 if stop_train():
                     break
@@ -314,7 +316,7 @@ class model(torch.nn.Module):
             # displaying progress
             if self.verbose > 0 and (sample_id + 1)%50 == 0:
                 print(f"{sample_id + 1} samples generated")
-        output = {"current_states": batch["current_state"], "next_state": batch["next_state"], "sampled_states": sample_store}
+        output = {"current_states": batch["current_state"], "next_state": batch["next_state"], "sampled_states": samples_store}
         return output
 
     def sample_autoregressive(self, sample_config, train = False):
