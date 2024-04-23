@@ -1,6 +1,8 @@
 import torch    
 import torch.nn.functional as F
-from ProbForecastFollmerProcess.neuralnet import B_Network
+
+from .neuralnet import B_Network
+from .utils import concat_along_channel_dim, add_batch_dimension
 
 def construct_time_discretization(N, device):    
     time = torch.linspace(0.0, 1.0, N + 1, device = device)
@@ -31,7 +33,7 @@ class model(torch.nn.Module):
         (self.time, self.stepsizes) = construct_time_discretization(self.num_euler_steps, device = self.device)
 
         # state spatial dimensions
-        self.spatial_dims = state["spatial_dims"]
+        self.input_dims = state["input_dims"]
 
         # interpolant (callables)
         self.alpha = interpolant["alpha"]
@@ -56,7 +58,15 @@ class model(torch.nn.Module):
         self.learning_rate = optim['learning_rate']
         self.num_mc_samples = optim['num_mc_samples']
         self.max_num_grad_steps = optim['max_num_grad_steps']
-
+        # optional optimization parameter for 
+        # performing learning rate scheduling
+        # By default, the Cosine Annealing lr scheduler 
+        # will be used. If self.constant_lr is True
+        # no lr scheduler will be used
+        constant_lr = False
+        if "constant_lr" in optim.keys():
+            constant_lr = optim["constant_lr"]
+        self.constant_lr = constant_lr
 
         # constructing data loader 
         self.train_data_loader = torch.utils.data.DataLoader(self.train_data, batch_size = self.batch_size, shuffle = True)
@@ -64,7 +74,14 @@ class model(torch.nn.Module):
         self.num_batches = len(self.train_data_loader)
         # getting the number of optimization iterations
         self.num_optim_iters = self.num_epochs*self.num_batches
-
+        # handling the number of optimization step 
+        # in case a maximum number of gradient (optimization)
+        # step is defined. In this case, the number of optimization
+        # iteration is set to  min(num_batches_per_epoch*num_epocs, max_num_grad_steps)
+        # This is only relevant if self.constant_lr == False, as it is used
+        # to set the number of iteration of the learning rate scheduler
+        if self.max_num_grad_steps:
+            self.num_optim_iters = min(self.num_optim_iters, self.max_num_grad_steps)
         # initializing optimizer and scheduler
         self.optimizer = torch.optim.AdamW(self.training_parameters, lr = self.learning_rate)
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, self.num_optim_iters)
@@ -134,13 +151,17 @@ class model(torch.nn.Module):
         current_state = ar_samples_store[ar_step, :]
         conditioning_state = current_state
         if self.random_ar_context:
-            # sampling random time index in range {0, ..., ar_step - 1}
-            random_context_index = torch.randint(high = ar_step, size = (1, ))
+            # sampling random time index in range {0, ..., ar_step - 1} (0 if the first element)
+            random_context_index = torch.randint(high = ar_step, size = (1, )).item() if ar_step > 1 else 0
             # retrieving random context state 
             random_context_state = ar_samples_store[random_context_index, :]
+            # showing optional debugging message
+            if self.debug:
+                print(f"{ar_step=}, {random_context_index=}")
+                print(f"{conditioning_state.shape=}, {random_context_state.shape=}")
             # concatenating the current state and the random context state
             # along channel dimension to construct the conditioning state
-            conditioning_state = torch.cat([conditioning_state, random_context_state], dim = 1) # (b, c*2, ...)
+            conditioning_state = concat_along_channel_dim(conditioning_state, random_context_state) # (b, c*2, ...)
         # constructing the batch dictionary 
         # again we need to add the batch dimension as we assume for now the 
         # autoregressive sampling is done each time from a single observation
@@ -197,7 +218,8 @@ class model(torch.nn.Module):
         self.optimizer.step()
         self.optimizer.zero_grad()
         # scheduler step
-        self.scheduler.step()
+        if not self.constant_lr:
+            self.scheduler.step()
         return loss.item()
 
     # method for performing a single sampling step on a batch of data
@@ -322,32 +344,35 @@ class model(torch.nn.Module):
     def sample_autoregressive(self, sample_config, train = False):
         # getting the number of autoregressive steps
         num_ar_steps = sample_config["num_ar_steps"]
-        
+        # getting the (optional) starting index which to start 
+        # the autoregressive sampling procedure from
+        # if not provided, start from zero by default
+        starting_idx = 0
+        if "starting_idx" in sample_config.keys():
+            starting_idx = sample_config["starting_idx"]
         # setting the target sampler function (either train or test)
         data_fun = self.train_data if train else self.test_data
 
         # defining the store for the estimated next states
-        ar_samples_store = torch.zeros((num_ar_steps, *self.spatial_dims))
+        ar_samples_store = torch.zeros((num_ar_steps, *self.input_dims))
 
-        # retrieving batch dictionary
-        batch = data_fun[0] 
+        # retrieving batch dictionary from the 
+        # chosen initial observation
+        batch = data_fun[starting_idx] 
+
         # since we are only getting the first element we 
         # are losing the batch dimension so we need to
         # add it for each value in the batch dictionary
-        for key, value in batch.items():
-            # adding the batch dimension
-            value = torch.unsqueeze(value, dim = 0)
-            # storing it back to the batch dictionary
-            batch[key] = value
-        # showing optional debugging message
-        if self.debug:
-            for k, v in batch.items():
-                print(k, v.shape)
+        batch = add_batch_dimension(batch, len(self.input_dims))
         # retrieving the ground truth path over the number of autoregressive steps
         gt_path = data_fun[:num_ar_steps]["next_state"]
 
         # iterating over each auto regressive step
         for ar_step in range(num_ar_steps):
+            # showing optional debugging message
+            if self.debug:
+                for k, v in batch.items():
+                    print(k, v.shape)
             # performing sampling step
             X = self.sampling_step(batch)
             # storing sampled observation 

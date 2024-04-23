@@ -2,6 +2,8 @@ import gc
 import torch
 import torchvision
 
+from .utils import concat_along_channel_dim
+
 # defining class for video dataset
 class VideoDataset(torch.utils.data.Dataset):
     def __init__(self, mp4_file_list, augmentations = None):
@@ -100,7 +102,7 @@ class LaggedDatasetWithRandomContext(torch.utils.data.Dataset):
         self.next_states = next_states
         self.random_context_states = random_context_states
         self.device = device
-    
+            
     def __len__(self):
         return self.next_states.shape[0]
     
@@ -108,7 +110,7 @@ class LaggedDatasetWithRandomContext(torch.utils.data.Dataset):
         current_state = self.current_states[idx].to(self.device) # shape: num_channels, height, width
         next_state = self.next_states[idx].to(self.device) # shape: num_channels, height, width
         random_context_state = self.random_context_states[idx].to(self.device) # shape: num_channels, height, width
-        conditioning_state = torch.cat([current_state, random_context_state], dim = 0 if len(current_state.shape) == 3 else 1) # shape: num_channels*3, height, width
+        conditioning_state = concat_along_channel_dim(current_state, random_context_state)
         batch_dict = {
             "current_state": current_state, 
             "next_state": next_state, 

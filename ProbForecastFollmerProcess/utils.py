@@ -5,7 +5,6 @@ import numpy as np
 
 from tqdm.notebook import tqdm
 
-from .data import LaggedDatasetWithRandomContext
 
 # defining function for ensuring reproducible results
 def ensure_reproducibility(SEED):
@@ -68,9 +67,9 @@ def pair_lagged_observations_with_random_context(tensor_video):
     return (target_frame, past_frame, random_context_frame)
 
 # defining function for creating a lagged dataset with random context from a tensor holding a video
-def get_video_dataset_with_random_context(video_tensor, device):
+def get_video_dataset_with_random_context(dataset_constructor, video_tensor, device):
     target_frame, past_frame, random_context_frame = pair_lagged_observations_with_random_context(video_tensor)
-    video_dataset_with_random_context = LaggedDatasetWithRandomContext(past_frame, target_frame, random_context_frame, device)
+    video_dataset_with_random_context = dataset_constructor(past_frame, target_frame, random_context_frame, device)
     return video_dataset_with_random_context
 
 # function for plotting densities heatmap
@@ -155,7 +154,7 @@ def simulate_jump_diffusion(simulation_conf):
         time.update()
     return state_store, observation_store
 
-# function for getting the angular representation of a vector
+# function for getting the angular representation of a 2D vector
 def vec2angle(x, y):
     # normalize vectors
     norm = torch.sqrt(x**2 + y**2)
@@ -163,3 +162,49 @@ def vec2angle(x, y):
     # computing angle
     theta = torch.arctan2(y_, x_)
     return theta
+
+# function for safely concatenating two image tensor of either 3 or 4 (batched) dimensions along the 
+# channel dimension to create the conditioning context described in the paper
+def concat_along_channel_dim(tensor_0, tensor_1):
+    ##################################################################
+    ################## INPUT VERIFICATION ############################
+    ##################################################################
+    state_ndims = tensor_0.dim()
+    context_ndims = tensor_1.dim()
+    assert state_ndims == context_ndims, f"{state_ndims=} and {context_ndims=} differ ({tensor_0.shape=}, {tensor_1.shape})"
+    assert state_ndims in [3, 4], f"{state_ndims=} is expected to either be 3 (C, H, W) or 4 (B, C, H, W)"
+    ##################################################################
+    ################## INPUT CONCATENATION ###########################
+    ##################################################################
+    # if we only have 3 dimensions, they 
+    # are supposed to be (C, H, W) so the 
+    # channel index will be 0
+    if state_ndims == 3:
+        channel_dim = 0
+    # this will only be in case we have 4 dims
+    # because we passed the assertion above
+    else:  
+        channel_dim = 1
+    tensor_cat = torch.cat([tensor_0, tensor_1], dim = channel_dim)
+    return tensor_cat
+
+# function for adding a batch dimension 
+# to an input batch dictionary in case
+# it is not already present, as inferred 
+# by the num_input_dims argument
+def add_batch_dimension(batch, num_input_dims):
+    batch_copy = dict()
+    for key, value in batch.items():
+        # checking if the batch does not 
+        # already have the batch dimension
+        # in case is already batched, do nothing
+        if value.dim() == num_input_dims:
+            # adding the batch dimension
+            value = torch.unsqueeze(value, dim = 0)
+        # if this is not the case perform sanity check to
+        # verify that the number of dimension is has already the 
+        # needed value of num_inpu_dims + 1 (batch dimension)
+        assert(value.dim() == num_input_dims + 1), f"the tensor has an unexpected number of dimensions"
+        # storing it back to the batch dictionary
+        batch_copy[key] = value
+    return batch_copy
