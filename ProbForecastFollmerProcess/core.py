@@ -365,7 +365,7 @@ class model(torch.nn.Module):
         # add it for each value in the batch dictionary
         batch = add_batch_dimension(batch, len(self.input_dims))
         # retrieving the ground truth path over the number of autoregressive steps
-        gt_path = data_fun[:num_ar_steps]["next_state"]
+        gt_path = data_fun[starting_idx:starting_idx+num_ar_steps]["next_state"]
 
         # iterating over each auto regressive step
         for ar_step in range(num_ar_steps):
