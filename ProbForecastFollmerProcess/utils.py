@@ -204,7 +204,7 @@ def add_batch_dimension(batch, num_input_dims):
         # if this is not the case perform sanity check to
         # verify that the number of dimension is has already the 
         # needed value of num_inpu_dims + 1 (batch dimension)
-        assert(value.dim() == num_input_dims + 1), f"the tensor has an unexpected number of dimensions"
+        assert(value.dim() == num_input_dims + 1), f"the tensor has an unexpected number of dimensions ({value.shape=})"
         # storing it back to the batch dictionary
         batch_copy[key] = value
     return batch_copy

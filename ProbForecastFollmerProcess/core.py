@@ -9,9 +9,14 @@ def construct_time_discretization(N, device):
     stepsizes = (1.0 / N) * torch.ones(N, device = device)
     return (time, stepsizes)
 
-class model(torch.nn.Module):
+####################################################################################################################
+####################################################################################################################
+##### Class implementing the 
+####################################################################################################################
+####################################################################################################################
+class PFFP(torch.nn.Module):
     def __init__(self, backbone, data, sample, state, interpolant, velocity, optim, device = 'cpu', debug = False, verbose = 1, random_ar_context = False):
-        super(model, self).__init__()
+        super(PFFP, self).__init__()
         # device
         self.device = device
 
@@ -232,6 +237,8 @@ class model(torch.nn.Module):
         Xc = batch["conditioning_state"]
         # getting number of observations
         num_obs = X0.shape[0]
+        # defining the store for the sampled trajectory
+        interpolant_trajectory = torch.zeros((self.num_euler_steps, num_obs, *self.input_dims) )
         ###################################################################
         ########### INTEGRATING USING EULER DISCRETIZATION ################
         ###################################################################
@@ -247,6 +254,8 @@ class model(torch.nn.Module):
         diffusion = self.sigma(self.time[0])*torch.sqrt(self.stepsizes[0])*eta
         # updating state
         X = X0 + drift + diffusion
+        # storing first state
+        interpolant_trajectory[0] = X
         ###################################################################
         ###################################################################
 
@@ -265,9 +274,12 @@ class model(torch.nn.Module):
             # computing diffusion term
             diffusion = self.g(s)*torch.sqrt(delta_s)*eta
 
-            # euler step
-            X = X + drift + diffusion
-        return X
+            # euler step and storing it
+            X = X + drift + diffusion 
+            interpolant_trajectory[n] = X
+        # defining sample data to be returned
+        sampled_data = {"X": X, "trajectory": interpolant_trajectory}
+        return sampled_data
 
     def train(self):
         # initializing counter of gradient steps
@@ -315,10 +327,14 @@ class model(torch.nn.Module):
             if stop_train():
                 break
 
-    def sample(self, sample_config, train = False):
+    def sample(self, sample_config):
         # getting number of samples and observations
         num_samples = sample_config["num_samples"]
         num_obs = sample_config["num_obs"]
+        # training data optional argument
+        train = False
+        if "train" in sample_config.keys():
+            train = sample_config["train"]
         # setting the target sampler function (either train or test)
         data_fun = self.train_data if train else self.test_data
         # retrieving batch dictionary
@@ -332,7 +348,8 @@ class model(torch.nn.Module):
         # iterating over the number of the samples generated for each obs
         for sample_id in range(num_samples):
             # performing sampling step
-            X = self.sampling_step(batch)
+            sampling_data = self.sampling_step(batch)
+            X = sampling_data["X"]
             # storing observation
             samples_store[sample_id, :, :] = X
             # displaying progress
@@ -341,9 +358,17 @@ class model(torch.nn.Module):
         output = {"current_states": batch["current_state"], "next_state": batch["next_state"], "sampled_states": samples_store}
         return output
 
-    def sample_autoregressive(self, sample_config, train = False):
+    def sample_autoregressive(self, sample_config):
         # getting the number of autoregressive steps
         num_ar_steps = sample_config["num_ar_steps"]
+        # techer forcing optional argument
+        teacher_forcing = False
+        if "teacher_forcing" in sample_config.keys():
+            teacher_forcing = sample_config["teacher_forcing"]
+        # training data optional argument
+        train = False
+        if "train" in sample_config.keys():
+            train = sample_config["train"]
         # getting the (optional) starting index which to start 
         # the autoregressive sampling procedure from
         # if not provided, start from zero by default
@@ -374,7 +399,11 @@ class model(torch.nn.Module):
                 for k, v in batch.items():
                     print(k, v.shape)
             # performing sampling step
-            X = self.sampling_step(batch)
+            sampling_data = self.sampling_step(batch)
+            X = sampling_data["X"]
+            # updating X with GT if teacher forcing enabled
+            if teacher_forcing:
+                X = gt_path[ar_step]
             # storing sampled observation 
             ar_samples_store[ar_step, :] = X
             # updating batch
